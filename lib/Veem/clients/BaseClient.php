@@ -2,9 +2,8 @@
 
 namespace Veem\clients;
 
-use Veem\clients\VeemClient;
 use GuzzleHttp\Client;
-
+use GuzzleHttp\Exception\ClientException;
 use Veem\converters\VeemErrorResponseConverter;
 
 class BaseClient
@@ -19,18 +18,20 @@ class BaseClient
     const PRODUCTION_BASE_URL = "https://api.veem.com";
 
     protected $veemClient;
+
     protected $baseURL;
+
     protected $httpClient;
 
     public function __construct(VeemClient $veemClient)
     {
         $this->veemClient = $veemClient;
         $this->baseURL = (strcmp(
-            $veemClient->getEnvironment(),
-            self::PRODUCTION
-        ) == 0) ? self::PRODUCTION_BASE_URL : self::SANDBOX_BASE_URL;
+                $veemClient->getEnvironment(),
+                self::PRODUCTION
+            ) == 0) ? self::PRODUCTION_BASE_URL : self::SANDBOX_BASE_URL;
 
-        $this->httpClient = new Client(array('base_uri' => $this->baseURL));
+        $this->httpClient = new Client(['base_uri' => $this->baseURL]);
     }
 
     public static function uuid_v4()
@@ -71,16 +72,16 @@ class BaseClient
         $headers = [];
 
         if ($this->veemClient != null) {
-            if (!empty($this->veemClient->getAccessToken())) {
+            if (! empty($this->veemClient->getAccessToken())) {
                 $headers['headers'] = [
-                    'Authorization' => 'Bearer ' . $this->veemClient->getAccessToken(),
-                    'X-REQUEST-ID' => self::uuid_v4()
+                    'Authorization' => 'Bearer '.$this->veemClient->getAccessToken(),
+                    'X-REQUEST-ID' => self::uuid_v4(),
                 ];
             } else {
-                $headers['auth'] = array(
+                $headers['auth'] = [
                     $this->veemClient->getClientId(),
-                    $this->veemClient->getClientSecret()
-                );
+                    $this->veemClient->getClientSecret(),
+                ];
             }
         }
         return $headers;
@@ -92,11 +93,11 @@ class BaseClient
 
             Construct requests body for GET request.
         */
-        $request_body = array();
-        if ($content != null && !empty($content)) {
+        $request_body = [];
+        if ($content != null && ! empty($content)) {
             $request_body = $content;
         }
-        if ($query != null && !empty($query)) {
+        if ($query != null && ! empty($query)) {
             $request_body['query'] = $query;
         }
         $request_body += ($headers) ?? $this->getRequestHeaders();
@@ -109,12 +110,15 @@ class BaseClient
 
             Construct requests body for POST/PATCH request.
         */
-        $request_body = array();
-        if ($content != null && !empty($content)) {
-            if ($jsonRequest) $request_body['json'] = $content;
-            else  $request_body = $content;
+        $request_body = [];
+        if ($content != null && ! empty($content)) {
+            if ($jsonRequest) {
+                $request_body['json'] = $content;
+            } else {
+                $request_body = $content;
+            }
         }
-        if ($query != null && !empty($query)) {
+        if ($query != null && ! empty($query)) {
             $request_body['query'] = $query;
         }
         $request_body += ($headers) ?? $this->getRequestHeaders();
@@ -127,8 +131,7 @@ class BaseClient
         $headers = null,
         $content = [],
         $jsonResponse = true
-    )
-    {
+    ) {
         /* getRequest function
 
             Handler for GET request.
@@ -136,13 +139,23 @@ class BaseClient
                 return VeemErrorResponse
             Else return json response body
         */
-        $response = $this->httpClient->get(
-            $this->baseURL . $endpoint,
-            $this->constructRequest($query, $headers, $content)
-        );
-        if (!$jsonResponse) return $response;
+        try {
+            $response = $this->httpClient->get(
+                $this->baseURL.$endpoint,
+                $this->constructRequest($query, $headers, $content)
+            );
+        } catch (ClientException $e) {
+            if (! in_array($e->getResponse()->getStatusCode(), [200, 201, 204, 302, 304])) {
+                return VeemErrorResponseConverter::convertResponse(json_decode($e->getResponse()->getBody()->getContents(), true));
+            }
+        }
+
+        if (! $jsonResponse) {
+            return $response;
+        }
+
         $responseBody = json_decode($response->getBody(), true);
-        if (!in_array($response->getStatusCode(), array(200, 201, 204, 302, 304))) {
+        if (! in_array($response->getStatusCode(), [200, 201, 204, 302, 304])) {
             return VeemErrorResponseConverter::convertResponse($responseBody);
         }
         return $responseBody;
@@ -155,8 +168,7 @@ class BaseClient
         $headers = null,
         $jsonRequest = true,
         $jsonResponse = true
-    )
-    {
+    ) {
         /* postRequest function
 
             Handler for POST request.
@@ -164,13 +176,24 @@ class BaseClient
                 return VeemErrorResponse
             Else return json response body
         */
-        $response = $this->httpClient->post(
-            $this->baseURL . $endpoint,
-            $this->constructContentRequest($json, $query, $headers, $jsonRequest)
-        );
-        if (!$jsonResponse) return $response;
+
+        try {
+            $response = $this->httpClient->post(
+                $this->baseURL.$endpoint,
+                $this->constructContentRequest($json, $query, $headers, $jsonRequest)
+            );
+        } catch (ClientException $e) {
+            if (! in_array($e->getResponse()->getStatusCode(), [200, 201, 204, 302, 304])) {
+                return VeemErrorResponseConverter::convertResponse(json_decode($e->getResponse()->getBody()->getContents(), true));
+            }
+        }
+
+        if (! $jsonResponse) {
+            return $response;
+        }
+
         $responseBody = json_decode($response->getBody(), true);
-        if (!in_array($response->getStatusCode(), array(200, 201, 204, 302, 304))) {
+        if (! in_array($response->getStatusCode(), [200, 201, 204, 302, 304])) {
             return VeemErrorResponseConverter::convertResponse($responseBody);
         }
         return $responseBody;
@@ -183,8 +206,7 @@ class BaseClient
         $headers = null,
         $jsonRequest = true,
         $jsonResponse = true
-    )
-    {
+    ) {
         /* patchRequest function
 
             Handler for PATCH request.
@@ -193,12 +215,14 @@ class BaseClient
             Else return json response body
         */
         $response = $this->httpClient->patch(
-            $this->baseURL . $endpoint,
+            $this->baseURL.$endpoint,
             $this->constructContentRequest($json, $query, $headers, $jsonRequest)
         );
-        if (!$jsonResponse) return $response;
+        if (! $jsonResponse) {
+            return $response;
+        }
         $responseBody = json_decode($response->getBody(), true);
-        if (!in_array($response->getStatusCode(), array(200, 201, 204, 302, 304))) {
+        if (! in_array($response->getStatusCode(), [200, 201, 204, 302, 304])) {
             return VeemErrorResponseConverter::convertResponse($responseBody);
         }
         return $responseBody;
